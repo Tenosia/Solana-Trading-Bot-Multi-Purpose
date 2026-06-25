@@ -10,7 +10,6 @@ export function isValidWalletAddress(address: string): boolean {
 
 export const generateReferralCode = (length: number) => {
   let code = '';
-  // Convert the Telegram username to a hexadecimal string
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   for (let i = 0; i < length; i++) {
     code += characters.charAt(Math.floor(Math.random() * characters.length));
@@ -20,22 +19,23 @@ export const generateReferralCode = (length: number) => {
 
 export function formatNumber(number: bigint | string | number) {
   if (!number) return "0";
-  // Convert the number to a string and add commas using regular expression
   return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 export function formatKMB(val: bigint | string | number) {
   if (!val) return "0";
-  if (Number(val) > 1000000000) {
-    return `${(Number(val) / 1000000000).toFixed(1)}B`;
+  const num = Number(val);
+  if (isNaN(num)) return "0";
+  if (num > 1_000_000_000) {
+    return `${(num / 1_000_000_000).toFixed(1)}B`;
   }
-  if (Number(val) > 1000000) {
-    return `${(Number(val) / 1000000).toFixed(1)}M`;
+  if (num > 1_000_000) {
+    return `${(num / 1_000_000).toFixed(1)}M`;
   }
-  if (Number(val) > 1000) {
-    return `${(Number(val) / 1000).toFixed(1)}k`;
+  if (num > 1_000) {
+    return `${(num / 1_000).toFixed(1)}k`;
   }
-  return Number(val).toFixed(3);
+  return num.toFixed(3);
 }
 
 export const contractLink = (mint: string) => {
@@ -55,42 +55,45 @@ export const dexscreenerLink = (mint: string) => {
 }
 
 export function formatPrice(price: number) {
-  if (!price) return 0;
-  if (price <= 0) return 0;
-  // If the price is less than 1, format it to 6 decimal places
+  if (!price || price <= 0) return "0";
   if (price < 1) {
     let decimal = 15;
-    while (1) {
-      if (price * 10 ** decimal < 1) {
-        break;
-      }
+    while (decimal > 0 && price * 10 ** decimal >= 1) {
       decimal--;
     }
-    return price.toFixed(decimal + 3);
+    return price.toFixed(Math.min(decimal + 3, 20));
   }
-  // If the price is greater than or equal to 1, format it to 3 decimal places
   return price.toFixed(2);
 }
 
-export const getPrice = async (mint: string) => {
+export const getPrice = async (mint: string): Promise<number> => {
   const key = `${mint}_price`;
-  const data = await redisClient.get(key);
-  if (data) {
-    return Number(data);
+  try {
+    const cached = await redisClient.get(key);
+    if (cached) {
+      return Number(cached);
+    }
+    const options = { method: 'GET', headers: REQUEST_HEADER };
+    const response = await fetch(`https://public-api.birdeye.so/defi/price?address=${mint}`, options);
+    if (!response.ok) {
+      throw new Error(`Birdeye API error: ${response.status}`);
+    }
+    const res = await response.json();
+    const price = res?.data?.value;
+    if (price == null) {
+      return 0;
+    }
+    await redisClient.set(key, price);
+    await redisClient.expire(key, 5);
+    return Number(price);
+  } catch (e) {
+    console.error(`getPrice failed for ${mint}:`, e);
+    return 0;
   }
-  const options = { method: 'GET', headers: REQUEST_HEADER };
-  const response = await fetch(`https://public-api.birdeye.so/defi/price?address=${mint}`, options)
-  const res = await response.json();
-  const price = res.data.value;
-  await redisClient.set(key, price);
-  await redisClient.expire(key, 5); // 5 seconds
-  return Number(price);
 };
 
-export const copytoclipboard = (
-  text: string
-) => {
-  return `<code class="text-entity-code clickable" role="textbox" tabindex="0" data-entity-type="MessageEntityCode">${text}</code>`;
+export const copytoclipboard = (text: string) => {
+  return `<code>${text}</code>`;
 }
 
 export const isEqual = (a: number, b: number) => {

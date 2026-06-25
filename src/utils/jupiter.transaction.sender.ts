@@ -35,10 +35,7 @@ export async function transactionSenderAndConfirmationWaiter({
       await wait(2_000);
       if (abortSignal.aborted) return;
       try {
-        await connection.sendRawTransaction(
-          serializedTransaction,
-          SEND_OPTIONS
-        );
+        await connection.sendRawTransaction(serializedTransaction, SEND_OPTIONS);
       } catch (e) {
         console.warn(`Failed to resend transaction: ${e}`);
       }
@@ -50,7 +47,6 @@ export async function transactionSenderAndConfirmationWaiter({
     const lastValidBlockHeight =
       blockhashWithExpiryBlockHeight.lastValidBlockHeight - 150;
 
-    // this would throw TransactionExpiredBlockheightExceededError
     await Promise.race([
       connection.confirmTransaction(
         {
@@ -61,40 +57,37 @@ export async function transactionSenderAndConfirmationWaiter({
         },
         "confirmed"
       ),
-      new Promise(async (resolve) => {
-        // in case ws socket died
+      new Promise<void>(async (resolve) => {
         while (!abortSignal.aborted) {
           await wait(2_000);
           const tx = await connection.getSignatureStatus(txid, {
             searchTransactionHistory: false,
           });
-          if (tx?.value?.confirmationStatus === "confirmed") {
-            resolve(tx);
+          const status = tx?.value?.confirmationStatus;
+          if (status === "confirmed" || status === "finalized") {
+            resolve();
           }
         }
       }),
     ]);
   } catch (e) {
     if (e instanceof TransactionExpiredBlockheightExceededError) {
-      // we consume this error and getTransaction would return null
       return null;
     } else {
-      // invalid state from web3.js
       throw e;
     }
   } finally {
     controller.abort();
   }
 
-  // in case rpc is not synced yet, we add some retries
-  const response = promiseRetry(
-    async (retry: any) => {
+  const response = await promiseRetry(
+    async (retry: (err: unknown) => never) => {
       const response = await connection.getTransaction(txid, {
         commitment: "confirmed",
         maxSupportedTransactionVersion: 0,
       });
       if (!response) {
-        retry(response);
+        retry(new Error(`Transaction ${txid} not yet available`));
       }
       return response;
     },

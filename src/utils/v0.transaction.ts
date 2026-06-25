@@ -1,4 +1,4 @@
-import { AddressLookupTableProgram, Connection, Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { getSignature } from "./get.signature";
 import { transactionSenderAndConfirmationWaiter } from "./jupiter.transaction.sender";
 import { wait } from "./wait";
@@ -11,8 +11,7 @@ export async function sendTransactionV0(
   instructions: TransactionInstruction[],
   payers: Keypair[],
 ): Promise<string | null> {
-  let latestBlockhash = await connection
-    .getLatestBlockhash(COMMITMENT_LEVEL)
+  const latestBlockhash = await connection.getLatestBlockhash(COMMITMENT_LEVEL);
 
   const messageV0 = new TransactionMessage({
     payerKey: payers[0].publicKey,
@@ -24,7 +23,6 @@ export async function sendTransactionV0(
   transaction.sign(payers);
   const signature = getSignature(transaction);
 
-  // We first simulate whether the transaction would be successful
   const { value: simulatedTransactionResponse } =
     await connection.simulateTransaction(transaction, {
       replaceRecentBlockhash: true,
@@ -33,10 +31,7 @@ export async function sendTransactionV0(
   const { err, logs } = simulatedTransactionResponse;
 
   if (err) {
-    // Simulation error, we can check the logs for more details
-    // If you are getting an invalid account error, make sure that you have the input mint account to actually swap from.
-    console.error("Simulation Error:");
-    console.error({ err, logs });
+    console.error("Simulation Error:", { err, logs });
     return null;
   }
 
@@ -52,45 +47,47 @@ export async function sendTransactionV0(
     },
   });
 
-  // If we are not getting a response back, the transaction has not confirmed.
   if (!transactionResponse) {
-    console.error("Transaction not confirmed");
+    console.error("Transaction not confirmed:", signature);
     return null;
   }
 
   if (transactionResponse.meta?.err) {
-    console.error(transactionResponse.meta?.err);
+    console.error("Transaction meta error:", transactionResponse.meta.err);
     return null;
   }
 
   return signature;
 }
 
-export const getSignatureStatus = async (signature: string) => {
+export const getSignatureStatus = async (signature: string): Promise<boolean> => {
   try {
-    const maxRetry = 30;
-    let retries = 0;
-    while (retries < maxRetry) {
+    const MAX_RETRIES = 30;
+    let confirmed = false;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       await wait(1_000);
-      retries++;
 
       const tx = await connection.getSignatureStatus(signature, {
         searchTransactionHistory: false,
       });
+
       if (tx?.value?.err) {
-        console.log("JitoTransaction Failed");
+        console.log("Transaction failed:", signature);
         break;
       }
-      if (tx?.value?.confirmationStatus === "confirmed" || tx?.value?.confirmationStatus === "finalized") {
-        retries = 0;
-        console.log("JitoTransaction confirmed!!!");
+
+      const status = tx?.value?.confirmationStatus;
+      if (status === "confirmed" || status === "finalized") {
+        confirmed = true;
+        console.log("Transaction confirmed:", signature);
         break;
       }
     }
 
-    if (retries > 0) return false;
-    return true;
+    return confirmed;
   } catch (e) {
+    console.error("getSignatureStatus error:", e);
     return false;
   }
 }
