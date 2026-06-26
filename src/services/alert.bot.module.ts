@@ -7,10 +7,8 @@ import {
   BridgeBotID,
   TradeBotID,
 } from "../bot.opts";
-// import { ReferralChannelController } from "../controllers/referral.channel";
 import {
   getReferralList,
-  get_referrer_info,
   update_channel_id,
 } from "./referral.service";
 import { ReferralIdenticalType } from "../main";
@@ -20,45 +18,43 @@ import {
 } from "./referral.channel.service";
 
 type ReferralChannel = {
-  chat_id: string; // channel id
+  chat_id: string;
   channel_name: string;
 };
 export type ReferralData = {
   channels: ReferralChannel[];
   referral_code: string;
   creator: string;
-  platform: ReferralPlatform; // TradeBot, BridgeBot
+  platform: ReferralPlatform;
   schedule: string;
 };
 
 export const alertbotModule = async (bot: TelegramBot) => {
   try {
     const referrals = await getReferralList();
-
     if (!referrals) return;
     for (const referral of referrals) {
-      processReferral(referral, bot);
+      await processReferral(referral, bot);
     }
   } catch (e) {
-    console.log("alertbotModule", e);
+    console.error("alertbotModule error:", e);
   }
 };
 
 const processReferral = async (referral: ReferralData, bot: TelegramBot) => {
   try {
     const { creator, referral_code, channels, platform, schedule } = referral;
-    const scheduleInseconds = parseInt(schedule) * 60;
-    const isValid = await validateSchedule(referral_code, scheduleInseconds);
+    const scheduleInSeconds = Math.max(0, Number(schedule)) * 60;
+    const isValid = await validateSchedule(referral_code, scheduleInSeconds);
     if (!isValid) return;
 
     const isTradeBot = Number(platform) === ReferralPlatform.TradeBot;
     for (let idx = 0; idx < channels.length; idx++) {
       const { chat_id } = channels[idx];
-
-      sendAlert(bot, chat_id, referral_code, creator, idx, isTradeBot);
+      await sendAlert(bot, chat_id, referral_code, creator, idx, isTradeBot);
     }
   } catch (e) {
-    console.log("processReferral", e);
+    console.error("processReferral error:", e);
   }
 };
 
@@ -71,7 +67,7 @@ const sendAlert = async (
   isTradeBot: boolean
 ) => {
   try {
-    if (!channelChatId || channelChatId === "") return;
+    if (!channelChatId) return;
     await bot.getChat(channelChatId);
 
     const botId = isTradeBot ? TradeBotID : BridgeBotID;
@@ -79,81 +75,74 @@ const sendAlert = async (
     const txt = isTradeBot ? "Try GrowTrade Now" : "Try GrowBridge Now";
     const referralLink = `https://t.me/${botId}?start=${referral_code}`;
 
-    const inline_keyboard = [
-      [
-        {
-          text: txt,
-          url: referralLink,
-        },
-      ],
+    const inline_keyboard: TelegramBot.InlineKeyboardButton[][] = [
+      [{ text: txt, url: referralLink }],
     ];
     if (isTradeBot) {
       inline_keyboard.push([
-        {
-          text: "Trade with us 📈",
-          url: "https://t.me/GrowTradeOfficial",
-        },
+        { text: "Trade with us 📈", url: "https://t.me/GrowTradeOfficial" },
       ]);
     }
 
-    bot.sendPhoto(channelChatId, botImg, {
+    await bot.sendPhoto(channelChatId, botImg, {
       caption: "",
-      reply_markup: {
-        inline_keyboard,
-      },
+      reply_markup: { inline_keyboard },
       parse_mode: "HTML",
     });
   } catch (error) {
-    console.log("sendAlert Error:", channelChatId, referral_code);
-    await handleError(error, creator, idx, channelChatId);
+    console.error("sendAlert error:", channelChatId, referral_code);
+    await handleSendError(error, creator, idx, channelChatId);
   }
 };
-const handleError = async (
-  error: any,
+
+const handleSendError = async (
+  error: unknown,
   creator: string,
   idx: number,
   channelChatId: string
 ) => {
   try {
-    const errMsg = error.response.body.description;
-    if (errMsg.includes("chat not found")) {
-      const lastNum: string | null = await redisClient.get(channelChatId);
-      if (!lastNum) {
-        await redisClient.set(channelChatId, "0");
-        return;
-      }
-      const retryCounter = parseInt(lastNum) + 1;
-      if (retryCounter <= 3) {
-        await redisClient.set(channelChatId, retryCounter.toFixed(0));
-        return;
-      }
-      await redisClient.del(channelChatId);
+    const errMsg =
+      (error as any)?.response?.body?.description ?? "";
+    if (!errMsg.includes("chat not found")) return;
 
-      const res = await update_channel_id(creator, idx, "delete");
-      if (!res) {
-        console.log("ServerError: cannot remove channel", creator, idx);
-      }
+    const lastNum = await redisClient.get(channelChatId);
+    if (!lastNum) {
+      await redisClient.set(channelChatId, "0");
+      return;
     }
-  } catch (e) {
-    return;
+
+    const retryCounter = parseInt(lastNum) + 1;
+    if (retryCounter <= 3) {
+      await redisClient.set(channelChatId, String(retryCounter));
+      return;
+    }
+
+    await redisClient.del(channelChatId);
+    const res = await update_channel_id(creator, idx, "delete");
+    if (!res) {
+      console.error("ServerError: cannot remove channel", creator, idx);
+    }
+  } catch {
+    // Suppress secondary errors during error handling
   }
 };
+
 const validateSchedule = async (referral_code: string, schedule: number) => {
   try {
-    const last_ts: string | null = await redisClient.get(referral_code);
-    const timestamp = Date.now() / 1000;
+    const last_ts = await redisClient.get(referral_code);
+    const timestamp = Math.floor(Date.now() / 1000);
     if (!last_ts) {
-      await redisClient.set(referral_code, timestamp.toFixed(0));
+      await redisClient.set(referral_code, String(timestamp));
       return true;
     }
-    const last_timestamp = Number(last_ts);
-    if (timestamp - last_timestamp > schedule) {
-      await redisClient.set(referral_code, timestamp.toFixed(0));
+    if (timestamp - Number(last_ts) > schedule) {
+      await redisClient.set(referral_code, String(timestamp));
       return true;
     }
     return false;
   } catch (e) {
-    console.log("validateSchedule", e);
+    console.error("validateSchedule error:", e);
     return false;
   }
 };
@@ -161,38 +150,22 @@ const validateSchedule = async (referral_code: string, schedule: number) => {
 export const newReferralChannelHandler = async (msg: TelegramBot.Message) => {
   try {
     const { chat, from, new_chat_members } = msg;
-    if (from && new_chat_members && from.username) {
-      // if bot added me, return
-      if (from.is_bot) return;
-      // if me is bot??,
-      const alertbotInfo = new_chat_members.find(
-        (member) => member.username === AlertBotID
-      );
-      if (!alertbotInfo) return;
+    if (!from || !new_chat_members || !from.username) return null;
+    if (from.is_bot) return null;
 
-      const creator = from.username;
-      // const refdata = await get_referrer_info(creator);
-      // if (!refdata) return;
-      // const referral_code = refdata.referral_code;
-      const chat_id = chat.id;
-      const channel_name = chat.title ?? "";
+    const alertbotInfo = new_chat_members.find(
+      (member) => member.username === AlertBotID
+    );
+    if (!alertbotInfo) return null;
 
-      return {
-        chatId: chat_id.toString(),
-        referrer: creator,
-        channelName: channel_name,
-        messageId: msg.message_id.toString(),
-      } as ReferralIdenticalType;
-      // await ReferralChannelController.create(
-      //   creator,
-      //   channel_name,
-      //   chat_id.toString(),
-      //   referral_code
-      // )
-    }
-    return null;
+    return {
+      chatId: chat.id.toString(),
+      referrer: from.username,
+      channelName: chat.title ?? "",
+      messageId: msg.message_id.toString(),
+    } as ReferralIdenticalType;
   } catch (e) {
-    console.log("newReferralChannelHandler", e);
+    console.error("newReferralChannelHandler error:", e);
     return null;
   }
 };
@@ -202,34 +175,18 @@ export const removeReferralChannelHandler = async (
 ) => {
   try {
     const { chat, from, left_chat_member } = msg;
-    if (from && left_chat_member && from.username) {
-      // if bot added me, return
-      if (from.is_bot) return;
+    if (!from || !left_chat_member || !from.username) return;
+    if (from.is_bot) return;
+    if (left_chat_member.username !== AlertBotID) return;
 
-      // if me is bot??,
-      const alertbotInfo = left_chat_member.username === AlertBotID;
-      if (!alertbotInfo) return;
-
-      const creator = from.username;
-      // const refdata = await get_referrer_info(creator);
-      // if (!refdata) return;
-      // const referral_code = refdata;
-      const chat_id = chat.id;
-
-      const referralChannelService = new ReferralChannelService();
-      await referralChannelService.deleteReferralChannel({
-        creator,
-        // platform: ReferralPlatform.TradeBot,
-        chat_id: chat_id.toString(),
-        channel_name: chat.title,
-      });
-      // await ReferralChannelController.deleteOne({
-      //   chat_id,
-      //   referral_code
-      // })
-    }
+    const referralChannelService = new ReferralChannelService();
+    await referralChannelService.deleteReferralChannel({
+      creator: from.username,
+      chat_id: chat.id.toString(),
+      channel_name: chat.title,
+    });
   } catch (e) {
-    console.log("newReferralChannelHandler", e);
+    console.error("removeReferralChannelHandler error:", e);
   }
 };
 
@@ -241,21 +198,12 @@ export const sendAlertForOurChannel = async (alertBot: TelegramBot) => {
       caption: "",
       reply_markup: {
         inline_keyboard: [
-          [
-            {
-              text: "Try GrowBridge now!",
-              url: `https://t.me/${TradeBotID}`,
-            },
-          ],
-          // [{
-          //   text: 'Start Trading With GrowTrade',
-          //   url: "https://t.me/growtradeapp_bot"
-          // }],
+          [{ text: "Try GrowBridge now!", url: `https://t.me/${TradeBotID}` }],
         ],
       },
       parse_mode: "HTML",
     });
   } catch (e) {
-    console.log("Channel Error", e);
+    console.error("sendAlertForOurChannel error:", e);
   }
 };

@@ -19,38 +19,24 @@ export class FeeService {
     total_fee_in_sol: number,
     total_fee_in_token: number,
     username: string,
-    pk: string,
+    secretKey: string,
     mint: string,
     isToken2022: boolean
-  ) {
+  ): Promise<TransactionInstruction[]> {
     try {
-      const wallet = Keypair.fromSecretKey(bs58.decode(pk));
-      let ref_info = await get_referral_info(username);
-      console.log("🚀 ~ ref_info:", ref_info);
+      const wallet = Keypair.fromSecretKey(bs58.decode(secretKey));
+      const ref_info = await get_referral_info(username);
 
-      let referralWallet: PublicKey = RESERVE_WALLET;
-      if (ref_info && ref_info.referral_address) {
-        const { referral_address } = ref_info;
-        console.log("🚀 ~ referral_address:", referral_address);
-        referralWallet = new PublicKey(ref_info.referral_address);
-      }
+      const referralWallet: PublicKey = ref_info?.referral_address
+        ? new PublicKey(ref_info.referral_address)
+        : RESERVE_WALLET;
 
-      console.log("🚀 ~ referralWallet:", referralWallet);
-      const referralFeePercent = ref_info?.referral_option ?? 0; // 25%
-
-      const referralFee = Number(
-        ((total_fee_in_sol * referralFeePercent) / 100).toFixed(0)
-      );
+      const referralFeePercent = ref_info?.referral_option ?? 0;
+      const referralFee = Math.round((total_fee_in_sol * referralFeePercent) / 100);
       const reserverStakingFee = total_fee_in_sol - referralFee;
 
-      console.log(
-        "Fee total:",
-        total_fee_in_sol,
-        total_fee_in_token,
-        referralFee,
-        reserverStakingFee
-      );
       const instructions: TransactionInstruction[] = [];
+
       if (reserverStakingFee > 0) {
         instructions.push(
           SystemProgram.transfer({
@@ -72,12 +58,12 @@ export class FeeService {
       }
 
       if (total_fee_in_token) {
-        // Burn
+        const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
         const ata = getAssociatedTokenAddressSync(
           new PublicKey(mint),
           wallet.publicKey,
           true,
-          isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+          tokenProgramId
         );
         instructions.push(
           createBurnInstruction(
@@ -86,13 +72,14 @@ export class FeeService {
             wallet.publicKey,
             BigInt(total_fee_in_token),
             [],
-            isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+            tokenProgramId
           )
         );
       }
+
       return instructions;
     } catch (e) {
-      console.log("- Fee handler has issue", e);
+      console.error("FeeService.getFeeInstructions error:", e);
       return [];
     }
   }

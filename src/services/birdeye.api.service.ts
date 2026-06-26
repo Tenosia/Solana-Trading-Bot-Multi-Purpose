@@ -1,62 +1,29 @@
 import { BIRDEYE_API_URL, REQUEST_HEADER } from "../config";
 
+async function fetchBirdeye<T>(path: string, mint: string | undefined | null): Promise<T> {
+  if (!mint) {
+    throw new Error("Mint address is not provided");
+  }
+  const url = `${BIRDEYE_API_URL}${path}?address=${mint}`;
+  const response = await fetch(url, { method: "GET", headers: REQUEST_HEADER });
+  if (!response.ok) {
+    throw new Error(`Birdeye API error ${response.status} for ${path}: ${mint}`);
+  }
+  const json = await response.json();
+  return json.data as T;
+}
+
 export const BirdEyeAPIService = {
-  getTokenOverview: (mint: string | undefined | null) => {
-    return new Promise((resolve, reject) => {
-      if (!mint) {
-        reject(new Error("Mint address is not provided"));
-        return;
-      }
-      const url = BIRDEYE_API_URL + "/defi/token_overview?address=" + mint;
-      const options = { method: "GET", headers: REQUEST_HEADER };
-      fetch(url, options)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error("Failed to fetch data");
-          }
-          return response.json();
-        })
-        .then((data) => resolve(data.data))
-        .catch((err) => reject(err));
-    });
+  getTokenOverview: (mint: string | undefined | null): Promise<TokenOverviewDataType> => {
+    return fetchBirdeye<TokenOverviewDataType>("/defi/token_overview", mint);
   },
-  getTokenSecurity: (mint: string | undefined | null) => {
-    return new Promise((resolve, reject) => {
-      if (!mint) {
-        reject(new Error("Mint address is not provided"));
-        return;
-      }
-      const url = BIRDEYE_API_URL + "/defi/token_security?address=" + mint;
-      const options = { method: "GET", headers: REQUEST_HEADER };
-      fetch(url, options)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error("Failed to fetch data");
-          }
-          return response.json();
-        })
-        .then((data) => resolve(data.data))
-        .catch((err) => reject(err));
-    });
+
+  getTokenSecurity: (mint: string | undefined | null): Promise<TokenSecurityInfoDataType> => {
+    return fetchBirdeye<TokenSecurityInfoDataType>("/defi/token_security", mint);
   },
-  getTokenCreationInfo: (mint: string | undefined | null) => {
-    return new Promise((resolve, reject) => {
-      if (!mint) {
-        reject(new Error("Mint address is not provided"));
-        return;
-      }
-      const url = BIRDEYE_API_URL + "/defi/token_creation_info?address=" + mint;
-      const options = { method: "GET", headers: REQUEST_HEADER };
-      fetch(url, options)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error("Failed to fetch data");
-          }
-          return response.json();
-        })
-        .then((data) => resolve(data.data))
-        .catch((err) => reject(err));
-    });
+
+  getTokenCreationInfo: (mint: string | undefined | null): Promise<TokenCreationInfoDataType> => {
+    return fetchBirdeye<TokenCreationInfoDataType>("/defi/token_creation_info", mint);
   },
 };
 
