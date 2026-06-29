@@ -1,83 +1,62 @@
-import { timeStamp } from "console";
 import { OpenMarketSchema } from "../models/index";
+import { FilterQuery, UpdateQuery } from "mongoose";
 
 export const OpenMarketService = {
-  create: async (props: any) => {
+  create: async (props: Record<string, unknown>) => {
     try {
       return await OpenMarketSchema.create(props);
-    } catch (err: any) {
-      console.log(err);
-      throw new Error(err.message);
+    } catch (err: unknown) {
+      console.error(err);
+      throw new Error((err as Error).message);
     }
   },
-  findById: async (props: any) => {
+  findById: async (id: string) => {
     try {
-      const { id } = props;
-      const result = await OpenMarketSchema.findById(id);
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findById(id);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findOne: async (props: any) => {
+  findOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const filter = props;
-      const result = await OpenMarketSchema.findOne(filter).sort({ timeStamp: -1 });
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findOne(filter).sort({ timeStamp: -1 });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findLastOne: async (props: any) => {
+  findLastOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const filter = props;
-      const result = await OpenMarketSchema.findOne(filter).sort({ updatedAt: -1 });
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findOne(filter).sort({ updatedAt: -1 });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  find: async (props: any) => {
-    const filter = props;
+  find: async (filter: FilterQuery<unknown>) => {
     try {
-      const result = await OpenMarketSchema.find(filter);
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.find(filter);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  updateOne: async (props: any) => {
-    const { id } = props;
+  updateOne: async (id: string, props: UpdateQuery<unknown>) => {
     try {
-      const result = await OpenMarketSchema.findByIdAndUpdate(id, props);
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findByIdAndUpdate(id, props);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findOneAndUpdate: async (props: any) => {
-    const { filter, data } = props;
+  findOneAndUpdate: async (filter: FilterQuery<unknown>, data: UpdateQuery<unknown>) => {
     try {
-      const result = await OpenMarketSchema.findOneAndUpdate(
-        filter,
-        { $set: data },
-        { new: true }
-      );
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findOneAndUpdate(filter, { $set: data }, { new: true });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  deleteOne: async (props: any) => {
+  deleteOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const result = await OpenMarketSchema.findOneAndDelete({ props });
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await OpenMarketSchema.findOneAndDelete(filter);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
-  }
+  },
 };

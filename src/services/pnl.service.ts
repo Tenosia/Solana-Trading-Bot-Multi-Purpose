@@ -1,7 +1,6 @@
 import { PositionService } from "./position.service";
 import { isEqual } from "../utils";
 import { QuoteRes } from "./jupiter.service";
-import { amount } from "@metaplex-foundation/js";
 import { waitFlagForBundleVerify } from "./redis.service";
 import { PNL_IMG_GENERATOR_API } from "../config";
 
@@ -80,7 +79,7 @@ export class PNLService {
       mint: this.mint,
     });
     if (!position) return null;
-    if (!this.quote) return;
+    if (!this.quote) return null;
     const { sol_amount, received_sol_amount } = position;
     const { outAmount } = this.quote;
     const profitInSOL = outAmount + received_sol_amount - sol_amount;
@@ -88,24 +87,19 @@ export class PNLService {
     return { profitInSOL, percent };
   }
 
-  async getPNLCard(pnlData: any): Promise<any> {
-    const url = PNL_IMG_GENERATOR_API + '/create'
-        const res = await fetch(url, {
-          method: 'POST',   
-          headers: {
-            'Content-Type': 'application/json'
-            }, 
-          body: JSON.stringify(pnlData) })
-  
-          if(res){
-            const data = await res.json();
-            if(res.status === 200)
-            {
-              // console.log(data.pplUrl)
-              const urls = data.pplUrl.split('/')
-              return { pnlCard: urls[urls.length - 1].replace('.png', 'png'), pnlUrl: data.pplUrl }
-            }
-          }
+  async getPNLCard(pnlData: Record<string, unknown>): Promise<{ pnlCard: string; pnlUrl: string } | null> {
+    const url = PNL_IMG_GENERATOR_API + "/create";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pnlData),
+    });
+
+    if (res.ok) {
+      const data = await res.json() as { pplUrl: string };
+      const urls = data.pplUrl.split("/");
+      return { pnlCard: urls[urls.length - 1], pnlUrl: data.pplUrl };
+    }
     return null;
   }
 
@@ -164,7 +158,6 @@ export class PNLService {
       const position = await PositionService.findLastOne(filter);
       if (!position) return;
       const { sol_amount, received_sol_amount } = position;
-      console.log("OutProfit", outAmount);
       const profit = outAmount + received_sol_amount - sol_amount;
       const data = {
         $inc: {

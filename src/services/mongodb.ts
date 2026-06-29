@@ -4,6 +4,7 @@ import { MONGODB_URL } from '../config';
 const connectOptions: mongoose.ConnectOptions = {
   autoCreate: true,
   retryReads: true,
+  retryWrites: true,
 };
 const connectMongodb = () => {
   return mongoose.connect(MONGODB_URL, connectOptions);

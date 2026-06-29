@@ -1,25 +1,19 @@
-import { ASSOCIATED_TOKEN_PROGRAM_ID, Account, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, closeAccount, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createTransferCheckedInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount, transfer } from "@solana/spl-token";
-import { AddressLookupTableAccount, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { AddressLookupTableAccount, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { AccountMeta, Instruction, QuoteGetRequest, SwapInstructionsResponse, SwapRequest, createJupiterApiClient } from '@jup-ag/api';
 import bs58 from "bs58";
-// import { ReferralProvider } from "@jup-ag/referral-sdk";
 import { COMMITMENT_LEVEL, RESERVE_WALLET, connection } from "../config";
-// import { transactionSenderAndConfirmationWaiter } from "../utils/jupiter.transaction.sender";
 import { getSignature } from "../utils/get.signature";
-// import { GasFeeEnum, UserTradeSettingService } from "./user.trade.setting.service";
-// import redisClient, { ITradeGasSetting } from "./redis";
-import { getSignatureStatus, sendTransactionV0 } from "../utils/v0.transaction";
+import { sendTransactionV0 } from "../utils/v0.transaction";
 import { JitoBundleService, tipAccounts } from "./jito.bundle";
 import { FeeService } from "./fee.service";
 import { fromWeiToValue } from "../utils";
 import redisClient from "./redis";
 import { UserTradeSettingService } from "./user.trade.setting.service";
 
-// const provider = new ReferralProvider(connection);
-
-const config = {
-  basePath: "https://growtradebot.fly.dev"
-}
+const JUPITER_API_CONFIG = {
+  basePath: "https://growtradebot.fly.dev",
+};
 
 let jupiterTradeableTokens: Array<string> = [];
 export class JupiterService {
@@ -38,7 +32,7 @@ export class JupiterService {
     });
   };
 
-  async getAdressLookupTableAccounts(
+  async getAddressLookupTableAccounts(
     keys: string[], connection: Connection
   ): Promise<AddressLookupTableAccount[]> {
     const addressLookupTableAccountInfos =
@@ -71,10 +65,7 @@ export class JupiterService {
       return JSON.parse(res) as boolean;
     }
 
-    const config = {
-      basePath: "https://growtradebot.fly.dev"
-    }
-    const jupiterQuoteApi = createJupiterApiClient(config);
+    const jupiterQuoteApi = createJupiterApiClient(JUPITER_API_CONFIG);
     const tokens = await jupiterQuoteApi.tokensGet();
     jupiterTradeableTokens = tokens;
     const tradeable = tokens.includes(mint);
@@ -84,7 +75,7 @@ export class JupiterService {
     return tradeable;
   };
   async swapToken(
-    pk: string,
+    secretKey: string,
     inputMint: string,
     outputMint: string,
     decimal: number,
@@ -103,28 +94,22 @@ export class JupiterService {
       // JitoFee
       const jitoFeeSetting = await UserTradeSettingService.getJitoFee(username);
       const jitoFeeValue = UserTradeSettingService.getJitoFeeValue(jitoFeeSetting);
-      const jitoFeeValueWei = BigInt((jitoFeeValue * 10 ** 9).toFixed());
+      const jitoFeeValueWei = BigInt(Math.round(jitoFeeValue * 10 ** 9));
 
-      let total_fee_percent = 0.01; // 1%
-      let total_fee_percent_in_sol = 0.01; // 1%
+      const total_fee_percent = 0.01;
+      let total_fee_percent_in_sol = 0.01;
       let total_fee_percent_in_token = 0;
 
       if (isFeeBurn) {
         total_fee_percent_in_sol = 0.0075;
         total_fee_percent_in_token = total_fee_percent - total_fee_percent_in_sol;
       }
-      // 0.5% => 50
       const slippageBps = _slippage * 100;
       const fee = _amount * (is_buy ? total_fee_percent_in_sol : total_fee_percent_in_token);
-      // in_amount
-      const amount = Number(((_amount - fee) * 10 ** decimal).toFixed(0));
-      const wallet = Keypair.fromSecretKey(bs58.decode(pk));
+      const amount = Math.round((_amount - fee) * 10 ** decimal);
+      const wallet = Keypair.fromSecretKey(bs58.decode(secretKey));
 
-      const config = {
-        basePath: "https://growtradebot.fly.dev"
-      }
-      const jupiterQuoteApi = createJupiterApiClient(config);
-      // const jupiterQuoteApi = createJupiterApiClient();
+      const jupiterQuoteApi = createJupiterApiClient(JUPITER_API_CONFIG);
       const quotegetOpts: QuoteGetRequest = {
         inputMint,
         outputMint,
@@ -134,39 +119,33 @@ export class JupiterService {
         asLegacyTransaction: false,
       }
       const quote = await jupiterQuoteApi.quoteGet(quotegetOpts);
-      console.log("🚀 Quote ~", Date.now())
       if (!quote) {
-        console.error("unable to quote");
-        return;
+        console.error("[JupiterService] Unable to get quote");
+        return null;
       }
       if (is_buy) {
-        total_fee_in_sol = Number((fee * 10 ** decimal).toFixed(0));
-        total_fee_in_token = Number((Number(quote.outAmount) * total_fee_percent_in_token).toFixed(0));
+        total_fee_in_sol = Math.round(fee * 10 ** decimal);
+        total_fee_in_token = Math.round(Number(quote.outAmount) * total_fee_percent_in_token);
       } else {
-        total_fee_in_token = Number((fee * 10 ** decimal).toFixed(0));
-        total_fee_in_sol = Number((Number(quote.outAmount) * total_fee_percent_in_sol).toFixed(0));
+        total_fee_in_token = Math.round(fee * 10 ** decimal);
+        total_fee_in_sol = Math.round(Number(quote.outAmount) * total_fee_percent_in_sol);
       }
 
-      // Gas in SOL
-      const GasFeeMulitplier = 10 ** 9;
-      const gasfeeValue = gasFee * GasFeeMulitplier;
-      // Get serialized transaction
+      const gasfeeValue = Math.round(gasFee * 10 ** 9);
       const swapReqOpts: SwapRequest = {
         quoteResponse: quote,
         userPublicKey: wallet.publicKey.toString(),
         dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: Number(gasfeeValue.toFixed(0)),
+        prioritizationFeeLamports: gasfeeValue,
       }
 
       const swapInstructions: SwapInstructionsResponse = await jupiterQuoteApi.swapInstructionsPost({ swapRequest: swapReqOpts });
-      console.log("🚀 Got Swap Result ~", Date.now())
       const {
-        tokenLedgerInstruction, // If you are using `useTokenLedger = true`.
-        computeBudgetInstructions, // The necessary instructions to setup the compute budget.
-        setupInstructions, // Setup missing ATA for the users.
-        swapInstruction, // The actual swap instruction.
-        cleanupInstruction, // Unwrap the SOL if `wrapAndUnwrapSol = true`.
-        addressLookupTableAddresses, // The lookup table addresses that you can use if you are using versioned transaction.
+        computeBudgetInstructions,
+        setupInstructions,
+        swapInstruction,
+        cleanupInstruction,
+        addressLookupTableAddresses,
       } = swapInstructions;
 
 
@@ -186,20 +165,17 @@ export class JupiterService {
         })
       )
 
-      // Referral Fee, ReserverStaking Fee, Burn Token
-      console.log("Before Fee: ", Date.now())
       const feeInstructions = await (new FeeService()).getFeeInstructions(
         total_fee_in_sol,
         total_fee_in_token,
         username,
-        pk,
+        secretKey,
         is_buy ? outputMint : inputMint,
         isToken2022
       );
       instructions.push(...feeInstructions);
-      console.log("After Fee: ", Date.now())
 
-      const addressLookupTableAccounts = await this.getAdressLookupTableAccounts(
+      const addressLookupTableAccounts = await this.getAddressLookupTableAccounts(
         addressLookupTableAddresses,
         connection
       );
@@ -226,27 +202,17 @@ export class JupiterService {
         });
       const { err, logs } = simulatedTransactionResponse;
 
-      console.log("🚀 Simulate ~", Date.now())
-      // if (!err) return;
-
       if (err) {
-        // Simulation error, we can check the logs for more details
-        // If you are getting an invalid account error, make sure that you have the input mint account to actually swap from.
-        console.error("Simulation Error:");
-        console.error({ err, logs });
-        return;
+        console.error("[JupiterService] Simulation error:", { err, logs });
+        return null;
       }
 
       const rawTransaction = transaction.serialize();
-      // Netherland
-      // const jitoBundleInstance = new JitoBundleService("ams");
       const jitoBundleInstance = new JitoBundleService();
       const bundleId = await jitoBundleInstance.sendBundle(rawTransaction);
-      // const status = await getSignatureStatus(signature);
-      if (!bundleId) return;
+      if (!bundleId) return null;
 
-      console.log("BundleID", bundleId);
-      console.log(`https://solscan.io/tx/${signature}`);
+      console.info(`[JupiterService] Bundle: ${bundleId} | TX: https://solscan.io/tx/${signature}`);
 
       return {
         quote,
@@ -256,10 +222,10 @@ export class JupiterService {
         bundleId
       };
     } catch (e) {
-      console.log("SwapToken Failed", e);
+      console.error("[JupiterService] swapToken failed:", e);
       return null;
     }
-  };
+  }
 
   async getQuote(
     inputMint: string,
@@ -271,9 +237,8 @@ export class JupiterService {
     try {
       if (inputAmount < 0.000001) return null;
 
-      const jupiterQuoteApi = createJupiterApiClient(config);
-      const amount = Number((inputAmount * (10 ** inDecimal)).toFixed(0));
-      // const jupiterQuoteApi = createJupiterApiClient();
+      const jupiterQuoteApi = createJupiterApiClient(JUPITER_API_CONFIG);
+      const amount = Math.round(inputAmount * 10 ** inDecimal);
       const quotegetOpts: QuoteGetRequest = {
         inputMint,
         outputMint,
@@ -282,205 +247,80 @@ export class JupiterService {
         onlyDirectRoutes: false,
         asLegacyTransaction: false,
       }
-      // console.log("Quote start", Date.now())
       const quote = await jupiterQuoteApi.quoteGet(quotegetOpts);
-      // console.log("Quote end", Date.now())
 
-      const {
-        inAmount, outAmount, priceImpactPct
-      } = quote;
-      const inAmountNum = fromWeiToValue(inAmount, inDecimal);
-      const outAmountNum = fromWeiToValue(outAmount, outDecimal);
+      const { inAmount, outAmount, priceImpactPct } = quote;
 
       return {
         inputMint,
         outputMint,
-        inAmount: inAmountNum,
-        outAmount: outAmountNum,
-        priceImpactPct: Number(priceImpactPct)
+        inAmount: fromWeiToValue(inAmount, inDecimal),
+        outAmount: fromWeiToValue(outAmount, outDecimal),
+        priceImpactPct: Number(priceImpactPct),
       } as QuoteRes;
-    } catch (e) {
-      // console.log("Simulate Get Quote", e)
+    } catch {
       return null;
     }
-  };
-  // createReferralAccount: async () => {
-  //   const referralAccountKeypair = Keypair.generate();
-  //   const tx = await provider.initializeReferralAccount({
-  //     payerPubKey: RESERVE_WALLET,
-  //     partnerPubKey: RESERVE_WALLET,
-  //     projectPubKey: JUPITER_PROJECT,
-  //     referralAccountPubKey: referralAccountKeypair.publicKey,
-  //   });
-
-  //   const referralAccount = await connection.getAccountInfo(
-  //     referralAccountKeypair.publicKey,
-  //   );
-
-  //   if (!referralAccount) {
-  //     const txId = await sendAndConfirmTransaction(connection, tx, [
-  //       reserveWallet,
-  //       referralAccountKeypair,
-  //     ]);
-  //     console.log({
-  //       txId,
-  //       referralAccountPubKey: referralAccountKeypair.publicKey.toString(),
-  //     });
-  //   } else {
-  //     console.log(
-  //       `referralAccount ${referralAccountKeypair.publicKey.toString()} already exists`,
-  //     );
-  //   }
-  // },
-  // createReferralTokenAccount: async (mintstr: string) => {
-  //   const mint = new PublicKey(mintstr);
-  //   const key = `referral_${mintstr}`;
-  //   const data = await redisClient.get(key);
-  //   if (data) {
-  //     return data;
-  //   }
-  //   const { tx, referralTokenAccountPubKey } =
-  //     await provider.initializeReferralTokenAccount({
-  //       payerPubKey: RESERVE_WALLET,
-  //       referralAccountPubKey: new PublicKey(
-  //         REFERRAL_ACCOUNT,
-  //       ), // Referral Key. You can create this with createReferralAccount.ts.
-  //       mint,
-  //     });
-
-  //   const referralTokenAccount = await connection.getAccountInfo(
-  //     referralTokenAccountPubKey,
-  //   );
-
-  //   if (!referralTokenAccount) {
-  //     const txId = await sendAndConfirmTransaction(connection, tx, [reserveWallet]);
-  //     console.log({
-  //       txId,
-  //       referralTokenAccountPubKey: referralTokenAccountPubKey.toString(),
-  //     });
-  //     await redisClient.set(key, referralTokenAccountPubKey.toString());
-  //   } else {
-  //     console.log(
-  //       `referralTokenAccount ${referralTokenAccountPubKey.toString()} for mint ${mint.toString()} already exists`,
-  //     );
-  //     await redisClient.set(key, referralTokenAccountPubKey.toString());
-  //   }
-  // },
-  // claimAll: async () => {
-  //   try {
-  //     // This method will returns a list of transactions for all claims batched by 5 claims for each transaction.
-  //     const tx = await provider.claim({
-  //       payerPubKey: RESERVE_WALLET,
-  //       referralAccountPubKey: new PublicKey(
-  //         REFERRAL_ACCOUNT,
-  //       ), // Referral Key. You can create this with createReferralAccount.ts.
-  //       mint: NATIVE_MINT
-  //     });
-
-  //     // Send each claim transaction one by one.
-  //     let retires = 0;
-  //     do {
-  //       try {
-  //         // tx.sign([reserveWallet]);
-  //         const { blockhash, lastValidBlockHeight } =
-  //           await connection.getLatestBlockhash();
-  //         const txid = await connection.sendTransaction(tx, [reserveWallet]);
-  //         const { value } = await connection.confirmTransaction({
-  //           signature: txid,
-  //           blockhash,
-  //           lastValidBlockHeight,
-  //         });
-
-  //         if (value.err) {
-  //           retires++;
-  //         } else {
-  //           console.log(`ClaimAll: https://solscan.io/tx/${txid}`);
-  //           retires = 10;
-  //         }
-  //       } catch (e) {
-  //         retires++;
-  //       }
-  //     } while (retires < 5);
-  //   } catch (e) {
-  //     console.log("ClaimAll Failed", e);
-  //   }
-  // },
-  async transferFeeSOL(fee: number, wallet: Keypair) {
+  }
+  async transferFeeSOL(fee: number, wallet: Keypair): Promise<void> {
     if (fee <= 0) return;
-    let retires = 0;
-    do {
+    const amount = Math.round(fee * 10 ** 9);
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const amount = Number((fee * 10 ** 9).toFixed(0));
         const txid = await sendTransactionV0(
           connection,
           [
-            ComputeBudgetProgram.setComputeUnitPrice({
-              microLamports: 5000,
-            }),
-            ComputeBudgetProgram.setComputeUnitLimit({
-              units: 20_000,
-            }),
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }),
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 20_000 }),
             SystemProgram.transfer({
               fromPubkey: wallet.publicKey,
               toPubkey: RESERVE_WALLET,
               lamports: amount,
-            })
+            }),
           ],
           [wallet]
-        )
-        if (!txid) {
-          retires++;
-        } else {
-          console.log("BuyFee:", `https://solscan.io/tx/${txid}`);
-          retires = 100;
+        );
+        if (txid) {
+          console.info(`[JupiterService] FeeSOL TX: https://solscan.io/tx/${txid}`);
+          break;
         }
       } catch (e) {
-        retires++;
-        console.log(`Take BuyFee Failed ${retires}/5`);
+        console.error(`[JupiterService] transferFeeSOL attempt ${attempt + 1}/5 failed:`, e);
       }
-    } while (retires < 5);
-  };
-  async transferSOL(fundAmount: number, decimals: number, toPubkey: string, pk: string, lamports: number = 5000, units: number = 20000) {
-    if (fundAmount <= 0) return;
-    let retires = 0;
-    const wallet = Keypair.fromSecretKey(bs58.decode(pk));
-    do {
+    }
+  }
+  async transferSOL(fundAmount: number, decimals: number, toPubkey: string, secretKey: string, microLamports: number = 5000, units: number = 20000): Promise<string | null> {
+    if (fundAmount <= 0) return null;
+    const wallet = Keypair.fromSecretKey(bs58.decode(secretKey));
+    const amount = Math.round(fundAmount * 10 ** decimals);
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const amount = Number((fundAmount * 10 ** decimals).toFixed(0));
         const txid = await sendTransactionV0(
           connection,
           [
-            ComputeBudgetProgram.setComputeUnitPrice({
-              microLamports: lamports,
-            }),
-            ComputeBudgetProgram.setComputeUnitLimit({
-              units: units,
-            }),
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports }),
+            ComputeBudgetProgram.setComputeUnitLimit({ units }),
             SystemProgram.transfer({
               fromPubkey: wallet.publicKey,
               toPubkey: new PublicKey(toPubkey),
               lamports: amount,
-            })
+            }),
           ],
           [wallet]
-        )
-        if (!txid) {
-          retires++;
-        } else {
-          console.log("TransferSOL:", `https://solscan.io/tx/${txid}`);
-          retires = 100;
+        );
+        if (txid) {
+          console.info(`[JupiterService] TransferSOL TX: https://solscan.io/tx/${txid}`);
           return txid;
         }
       } catch (e) {
-        retires++;
-        console.log(`Take Withdraw Failed ${retires}/5`);
+        console.error(`[JupiterService] transferSOL attempt ${attempt + 1}/5 failed:`, e);
       }
-    } while (retires < 5);
+    }
     return null;
-  };
-  async transferSPL(mint: string, fundAmount: number, decimals: number, toPubkey: string, pk: string, isToken2022: boolean) {
+  }
+  async transferSPL(mint: string, fundAmount: number, decimals: number, toPubkey: string, secretKey: string, isToken2022: boolean): Promise<string | null> {
     if (fundAmount <= 0) return null;
-    const wallet = Keypair.fromSecretKey(bs58.decode(pk));
+    const wallet = Keypair.fromSecretKey(bs58.decode(secretKey));
 
     const sourceAta = getAssociatedTokenAddressSync(
       new PublicKey(mint),
@@ -498,17 +338,10 @@ export class JupiterService {
     );
 
     const instructions: TransactionInstruction[] = [];
-    // This is the optimal logic, considering TX fee, client-side computation, RPC roundtrips and guaranteed idempotent.
-    // Sadly we can't do this atomically.
-    let account: Account;
     try {
-      account = await getAccount(connection, destAta, COMMITMENT_LEVEL, isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
+      await getAccount(connection, destAta, COMMITMENT_LEVEL, isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
     } catch (error: unknown) {
-      // TokenAccountNotFoundError can be possible if the associated address has already received some lamports,
-      // becoming a system account. Assuming program derived addressing is safe, this is the only case for the
-      // TokenInvalidAccountOwnerError in this code path.
       if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
-        // As this isn't atomic, it's possible others can create associated accounts meanwhile.
         instructions.push(
           createAssociatedTokenAccountInstruction(
             wallet.publicKey,
@@ -518,65 +351,48 @@ export class JupiterService {
             isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
             ASSOCIATED_TOKEN_PROGRAM_ID
           )
-        )
+        );
       } else {
         return null;
       }
     }
-    const amount = Number((fundAmount * 10 ** decimals).toFixed(0));
+    const amount = Math.round(fundAmount * 10 ** decimals);
 
-    if (isToken2022) {
-      instructions.push(
-        createTransferCheckedInstruction(
-          sourceAta,
-          new PublicKey(mint),
-          destAta,
-          wallet.publicKey,
-          amount,
-          decimals,
-          [],
-          TOKEN_2022_PROGRAM_ID
-        )
-      )
-    } else {
-      instructions.push(
-        createTransferInstruction(
-          sourceAta,
-          destAta,
-          wallet.publicKey,
-          amount
-        )
-      )
-    }
+    instructions.push(
+      isToken2022
+        ? createTransferCheckedInstruction(
+            sourceAta,
+            new PublicKey(mint),
+            destAta,
+            wallet.publicKey,
+            amount,
+            decimals,
+            [],
+            TOKEN_2022_PROGRAM_ID
+          )
+        : createTransferInstruction(sourceAta, destAta, wallet.publicKey, amount)
+    );
 
-    let retires = 0;
-    do {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const txid = await sendTransactionV0(
           connection,
           [
-            ComputeBudgetProgram.setComputeUnitPrice({
-              microLamports: 100000,
-            }),
-            ComputeBudgetProgram.setComputeUnitLimit({
-              units: 200_000,
-            }),
-            ...instructions
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }),
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
+            ...instructions,
           ],
           [wallet]
-        )
-        if (!txid) {
-          retires++;
-        } else {
-          console.log("Transfer SPL:", `https://solscan.io/tx/${txid}`);
-          retires = 100;
+        );
+        if (txid) {
+          console.info(`[JupiterService] TransferSPL TX: https://solscan.io/tx/${txid}`);
           return txid;
         }
       } catch (e) {
-        retires++;
-        console.log(`Take Transfer SPL Failed ${retires}/5`);
+        console.error(`[JupiterService] transferSPL attempt ${attempt + 1}/5 failed:`, e);
       }
-    } while (retires < 5);
+    }
+    return null;
   }
 }
 
