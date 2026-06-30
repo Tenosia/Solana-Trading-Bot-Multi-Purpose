@@ -1,13 +1,12 @@
 import redisClient from "./redis";
 
-export const setFlagForBundleVerify = async (username: string) => {
+export const setFlagForBundleVerify = async (username: string): Promise<void> => {
   const key = `${username}_wait_bundle`;
-  await redisClient.set(key, "true");
-  await redisClient.expire(key, 30);
-}
-export const waitFlagForBundleVerify = async (username: string) => {
+  await redisClient.set(key, "true", { EX: 30 });
+};
+
+export const waitFlagForBundleVerify = async (username: string): Promise<boolean> => {
   const key = `${username}_wait_bundle`;
   const res = await redisClient.get(key);
-  if (!res) return false;
-  return true;
-}
+  return res !== null;
+};
