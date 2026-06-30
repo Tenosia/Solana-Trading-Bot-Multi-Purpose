@@ -1,90 +1,65 @@
-import { timeStamp } from "console";
+import { FilterQuery, UpdateQuery } from "mongoose";
 import { TokenSchema } from "../models/index";
 
 export const RaydiumTokenService = {
-  create: async (props: any) => {
+  create: async (props: Record<string, unknown> & { poolId: string }) => {
     try {
-      // return await TokenSchema.create(props);
       const existing = await TokenSchema.findOne({ poolId: props.poolId });
       if (existing == null) {
-        // console.log(props)
         return await TokenSchema.create(props);
-      } else {
-        return;
       }
-    } catch (err: any) {
-      console.log(err);
-      // throw new Error(err.message);
+      return null;
+    } catch (err: unknown) {
+      console.error(err);
     }
   },
-  findById: async (props: any) => {
+  findById: async (id: string) => {
     try {
-      const { id } = props;
-      const result = await TokenSchema.findById(id);
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findById(id);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findOne: async (props: any) => {
+  findOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const filter = props;
-      const result = await TokenSchema.findOne(filter).sort({ timeStamp: -1 });
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findOne(filter).sort({ timeStamp: -1 });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findLastOne: async (props: any) => {
+  findLastOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const filter = props;
-      const result = await TokenSchema.findOne(filter).sort({ creation_ts: 1 });
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findOne(filter).sort({ creation_ts: 1 });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  find: async (props: any) => {
-    const filter = props;
+  find: async (filter: FilterQuery<unknown>) => {
     try {
-      const result = await TokenSchema.find(filter);
-
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.find(filter);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  updateOne: async (props: any) => {
-    const { id } = props;
+  updateOne: async (id: string, update: UpdateQuery<unknown>) => {
     try {
-      const result = await TokenSchema.findByIdAndUpdate(id, props);
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findByIdAndUpdate(id, update);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  findOneAndUpdate: async (props: any) => {
-    const { filter, data } = props;
+  findOneAndUpdate: async (filter: FilterQuery<unknown>, data: UpdateQuery<unknown>) => {
     try {
-      const result = await TokenSchema.findOneAndUpdate(
-        filter,
-        { $set: data },
-        { new: true }
-      );
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findOneAndUpdate(filter, { $set: data }, { new: true });
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
   },
-  deleteOne: async (props: any) => {
+  deleteOne: async (filter: FilterQuery<unknown>) => {
     try {
-      const result = await TokenSchema.findOneAndDelete({ props });
-      return result;
-    } catch (err: any) {
-      throw new Error(err.message);
+      return await TokenSchema.findOneAndDelete(filter);
+    } catch (err: unknown) {
+      throw new Error((err as Error).message);
     }
-  }
+  },
 };
